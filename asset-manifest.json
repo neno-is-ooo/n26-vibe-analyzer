@@ -1,13 +1,13 @@
 {
   "files": {
-    "main.css": "/n26-vibe-analyzer/static/css/main.8a53360e.css",
-    "main.js": "/n26-vibe-analyzer/static/js/main.25033d90.js",
+    "main.css": "/n26-vibe-analyzer/static/css/main.7326b0bb.css",
+    "main.js": "/n26-vibe-analyzer/static/js/main.e462d5cf.js",
     "index.html": "/n26-vibe-analyzer/index.html",
-    "main.8a53360e.css.map": "/n26-vibe-analyzer/static/css/main.8a53360e.css.map",
-    "main.25033d90.js.map": "/n26-vibe-analyzer/static/js/main.25033d90.js.map"
+    "main.7326b0bb.css.map": "/n26-vibe-analyzer/static/css/main.7326b0bb.css.map",
+    "main.e462d5cf.js.map": "/n26-vibe-analyzer/static/js/main.e462d5cf.js.map"
   },
   "entrypoints": [
-    "static/css/main.8a53360e.css",
-    "static/js/main.25033d90.js"
+    "static/css/main.7326b0bb.css",
+    "static/js/main.e462d5cf.js"
   ]
 }
