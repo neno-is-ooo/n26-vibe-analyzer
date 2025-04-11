@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { 
+import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   Cell, ReferenceLine, Area
 } from 'recharts';
 import Papa from 'papaparse';
 import _ from 'lodash';
+import SortableTable from './ui/SortableTable';
 
 const FinancialDashboard = ({ csvData }) => {
   const [data, setData] = useState(null);
@@ -69,9 +70,20 @@ const FinancialDashboard = ({ csvData }) => {
           net: _.sumBy(txs, t => t["Amount (EUR)"])
         };
       }).sort((a, b) => a.month.localeCompare(b.month));
+      // Consolidate user's own transfer names before partner analysis
+      const nameVariations = ["EUGENIO MARIA BATTAGLIA", "Eugenio Battaglia", "Eugenio Maria Battaglia"];
+      const consolidatedSortedTransactions = sortedTransactions.map(tx => {
+        const partnerName = tx["Partner Name"];
+        // Ensure partnerName is a string before calling string methods
+        if (typeof partnerName === 'string' && nameVariations.some(variation => partnerName.toUpperCase() === variation.toUpperCase())) {
+           return { ...tx, "Partner Name": "My Transfers" };
+        }
+        return tx;
+      });
+      
       
       // 3. PARTNER ANALYSIS
-      const partnerVolumes = _.chain(transactions)
+      const partnerVolumes = _.chain(consolidatedSortedTransactions) // Use consolidated data
         .groupBy('Partner Name')
         .map((txs, name) => ({
           name,
@@ -99,13 +111,19 @@ const FinancialDashboard = ({ csvData }) => {
       // 5. TRANSACTION TYPES
       const typeDistribution = _.chain(transactions)
         .groupBy('Type')
-        .map((txs, type) => ({
-          name: type,
-          count: txs.length,
-          percentage: parseFloat((txs.length / transactions.length * 100).toFixed(1)),
-          value: _.sumBy(txs, t => Math.abs(t["Amount (EUR)"])),
-          totalAmount: _.sumBy(txs, t => t["Amount (EUR)"])
-        }))
+        .map((txs, type) => {
+          let displayName = type;
+          if (type === 'Presentment') displayName = 'Card Payment';
+          if (type === 'Presentment Refund') displayName = 'Card Refund';
+          // Add more mappings here if needed
+          return {
+            name: displayName, // Use renamed label
+            count: txs.length,
+            percentage: parseFloat((txs.length / transactions.length * 100).toFixed(1)),
+            value: _.sumBy(txs, t => Math.abs(t["Amount (EUR)"])),
+            totalAmount: _.sumBy(txs, t => t["Amount (EUR)"])
+          };
+        })
         .orderBy(['count'], ['desc'])
         .value();
       
@@ -170,7 +188,7 @@ const FinancialDashboard = ({ csvData }) => {
       const monthlyBalances = {};
       
       Object.entries(allDailyBalances).forEach(([date, balance]) => {
-        const d = new Date(date);
+        // const d = new Date(date); // Removed unused variable
         
         // Get week and year
         const { year, week } = getWeekNumber(date);
@@ -244,10 +262,10 @@ const FinancialDashboard = ({ csvData }) => {
       }).sort((a, b) => a.date.localeCompare(b.date));
       
       // 7. LARGEST TRANSACTIONS
-      const largestInflows = _.chain(transactions)
+      const largestInflows = _.chain(consolidatedSortedTransactions) // Use consolidated data
         .filter(t => t["Amount (EUR)"] > 0)
         .orderBy(["Amount (EUR)"], ["desc"])
-        .take(5)
+        .take(10) // Show top 10
         .map(t => ({
           name: t["Partner Name"],
           date: t["Booking Date"],
@@ -256,10 +274,10 @@ const FinancialDashboard = ({ csvData }) => {
         }))
         .value();
 
-      const largestOutflows = _.chain(transactions)
+      const largestOutflows = _.chain(consolidatedSortedTransactions) // Use consolidated data
         .filter(t => t["Amount (EUR)"] < 0)
         .orderBy(["Amount (EUR)"], ["asc"])
-        .take(5)
+        .take(10) // Show top 10
         .map(t => ({
           name: t["Partner Name"],
           date: t["Booking Date"],
@@ -272,16 +290,16 @@ const FinancialDashboard = ({ csvData }) => {
       setData({
         basicStats: {
           dateRange: { start: minDate.toISOString().slice(0, 10), end: maxDate.toISOString().slice(0, 10) },
-          totalTransactions: transactions.length,
+          totalTransactions: transactions.length, // Use original length for stats
           totalVolume,
           inflows,
           outflows,
           netFlow
         },
         monthlyStats,
-        partnerVolumes: partnerVolumes.slice(0, 10),
+        partnerVolumes: partnerVolumes.slice(0, 10), // Already uses consolidated data via calculation chain
         currencyDistribution: currencyDistribution.slice(0, 6),
-        typeDistribution: typeDistribution.slice(0, 7),
+        typeDistribution: typeDistribution.slice(0, 7), // Already uses renamed labels via calculation chain
         dailyBalances: formattedDailyData,
         weeklyBalances: weeklyAvgBalances,
         monthlyBalances: monthlyAvgBalances,
@@ -290,10 +308,11 @@ const FinancialDashboard = ({ csvData }) => {
           sumOfDailyBalances,
           yearlyAvgBalance
         },
-        largestTransactions: {
+        largestTransactions: { // Already uses consolidated data via calculation chain
           inflows: largestInflows,
           outflows: largestOutflows
-        }
+        },
+        allTransactions: consolidatedSortedTransactions // Add consolidated transactions to state
       });
       
       setIsLoading(false);
@@ -502,50 +521,58 @@ const FinancialDashboard = ({ csvData }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                 <div>
                   <h3 className="text-lg font-semibold mb-2">Largest Inflows</h3>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full">
-                      <thead>
-                        <tr className="bg-gray-100">
-                          <th className="py-2 px-4 text-left">Partner</th>
-                          <th className="py-2 px-4 text-left">Date</th>
-                          <th className="py-2 px-4 text-right">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.largestTransactions.inflows.map((tx, index) => (
-                          <tr key={index} className="border-b border-gray-200">
-                            <td className="py-2 px-4">{tx.name}</td>
-                            <td className="py-2 px-4">{tx.date}</td>
-                            <td className="py-2 px-4 text-right text-green-600">{formatCurrency(tx.value)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <SortableTable
+                    tableName="Largest Inflows"
+                    data={data.largestTransactions.inflows}
+                    columns={[
+                      {
+                        key: 'name',
+                        header: 'Partner',
+                        type: 'string'
+                      },
+                      {
+                        key: 'date',
+                        header: 'Date',
+                        type: 'date'
+                      },
+                      {
+                        key: 'value',
+                        header: 'Amount',
+                        type: 'number',
+                        className: 'text-right text-green-600',
+                        headerClassName: 'text-right',
+                        render: (row) => formatCurrency(row.value)
+                      }
+                    ]}
+                  />
                 </div>
                 
                 <div>
                   <h3 className="text-lg font-semibold mb-2">Largest Outflows</h3>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full">
-                      <thead>
-                        <tr className="bg-gray-100">
-                          <th className="py-2 px-4 text-left">Partner</th>
-                          <th className="py-2 px-4 text-left">Date</th>
-                          <th className="py-2 px-4 text-right">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.largestTransactions.outflows.map((tx, index) => (
-                          <tr key={index} className="border-b border-gray-200">
-                            <td className="py-2 px-4">{tx.name}</td>
-                            <td className="py-2 px-4">{tx.date}</td>
-                            <td className="py-2 px-4 text-right text-red-600">-{formatCurrency(tx.value)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <SortableTable
+                    tableName="Largest Outflows"
+                    data={data.largestTransactions.outflows}
+                    columns={[
+                      {
+                        key: 'name',
+                        header: 'Partner',
+                        type: 'string'
+                      },
+                      {
+                        key: 'date',
+                        header: 'Date',
+                        type: 'date'
+                      },
+                      {
+                        key: 'value',
+                        header: 'Amount',
+                        type: 'number',
+                        className: 'text-right text-red-600',
+                        headerClassName: 'text-right',
+                        render: (row) => `-${formatCurrency(row.value)}`
+                      }
+                    ]}
+                  />
                 </div>
               </div>
             </div>
@@ -571,41 +598,66 @@ const FinancialDashboard = ({ csvData }) => {
                 </ResponsiveContainer>
               </div>
               
-              <div className="overflow-x-auto">
-                <table className="min-w-full">
-                  <thead>
-                    <tr className="bg-gray-100">
-                      <th className="py-2 px-4 text-left border">Month</th>
-                      <th className="py-2 px-4 text-right border">Transactions</th>
-                      <th className="py-2 px-4 text-right border">Inflows</th>
-                      <th className="py-2 px-4 text-right border">Outflows</th>
-                      <th className="py-2 px-4 text-right border">Net Flow</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.monthlyStats.map((month, index) => (
-                      <tr key={index} className={month.net < 0 ? "bg-red-50" : "bg-green-50"}>
-                        <td className="py-2 px-4 border">{month.monthDisplay}</td>
-                        <td className="py-2 px-4 border text-right">{month.count}</td>
-                        <td className="py-2 px-4 border text-right text-green-600">{formatCurrency(month.inflow)}</td>
-                        <td className="py-2 px-4 border text-right text-red-600">{formatCurrency(month.outflow)}</td>
-                        <td className="py-2 px-4 border text-right font-medium" style={{color: month.net < 0 ? '#F44336' : '#4CAF50'}}>
-                          {formatCurrency(month.net)}
-                        </td>
-                      </tr>
-                    ))}
-                    <tr className="font-bold border-t-2 border-gray-300">
-                      <td className="py-2 px-4 border">TOTAL</td>
-                      <td className="py-2 px-4 border text-right">{data.basicStats.totalTransactions}</td>
-                      <td className="py-2 px-4 border text-right text-green-600">{formatCurrency(data.basicStats.inflows)}</td>
-                      <td className="py-2 px-4 border text-right text-red-600">{formatCurrency(Math.abs(data.basicStats.outflows))}</td>
-                      <td className="py-2 px-4 border text-right" style={{color: data.basicStats.netFlow < 0 ? '#F44336' : '#4CAF50'}}>
-                        {formatCurrency(data.basicStats.netFlow)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <SortableTable
+                tableName="Monthly Cash Flow"
+                data={[
+                  ...data.monthlyStats,
+                  {
+                    monthDisplay: 'TOTAL',
+                    count: data.basicStats.totalTransactions,
+                    inflow: data.basicStats.inflows,
+                    outflow: Math.abs(data.basicStats.outflows),
+                    net: data.basicStats.netFlow,
+                    isTotal: true
+                  }
+                ]}
+                columns={[
+                  {
+                    key: 'monthDisplay',
+                    header: 'Month',
+                    type: 'string',
+                    className: 'border'
+                  },
+                  {
+                    key: 'count',
+                    header: 'Transactions',
+                    type: 'number',
+                    className: 'border text-right',
+                    headerClassName: 'text-right border'
+                  },
+                  {
+                    key: 'inflow',
+                    header: 'Inflows',
+                    type: 'number',
+                    className: 'border text-right text-green-600',
+                    headerClassName: 'text-right border',
+                    render: (row) => formatCurrency(row.inflow)
+                  },
+                  {
+                    key: 'outflow',
+                    header: 'Outflows',
+                    type: 'number',
+                    className: 'border text-right text-red-600',
+                    headerClassName: 'text-right border',
+                    render: (row) => formatCurrency(row.outflow)
+                  },
+                  {
+                    key: 'net',
+                    header: 'Net Flow',
+                    type: 'number',
+                    className: 'border text-right font-medium',
+                    headerClassName: 'text-right border',
+                    render: (row) => (
+                      <span style={{color: row.net < 0 ? '#F44336' : '#4CAF50'}}>
+                        {formatCurrency(row.net)}
+                      </span>
+                    )
+                  }
+                ]}
+                getRowClassName={(row) =>
+                  row.isTotal ? 'font-bold border-t-2 border-gray-300' : (row.net < 0 ? 'bg-red-50' : 'bg-green-50')
+                }
+              />
             </div>
           )}
           
@@ -655,34 +707,91 @@ const FinancialDashboard = ({ csvData }) => {
                     </ResponsiveContainer>
                   </div>
                   
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full">
-                      <thead>
-                        <tr className="bg-gray-100">
-                          <th className="py-2 px-4 text-left border">Type</th>
-                          <th className="py-2 px-4 text-right border">Count</th>
-                          <th className="py-2 px-4 text-right border">Percentage</th>
-                          <th className="py-2 px-4 text-right border">Volume</th>
-                          <th className="py-2 px-4 text-right border">Net Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.typeDistribution.map((type, index) => (
-                          <tr key={index} className="border-b border-gray-200">
-                            <td className="py-2 px-4 border">{type.name}</td>
-                            <td className="py-2 px-4 border text-right">{type.count}</td>
-                            <td className="py-2 px-4 border text-right">{type.percentage}%</td>
-                            <td className="py-2 px-4 border text-right">{formatCurrency(type.value)}</td>
-                            <td className="py-2 px-4 border text-right" style={{color: type.totalAmount < 0 ? '#F44336' : '#4CAF50'}}>
-                              {formatCurrency(type.totalAmount)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <SortableTable
+                    tableName="Transaction Types"
+                    data={data.typeDistribution}
+                    columns={[
+                      {
+                        key: 'name',
+                        header: 'Type',
+                        type: 'string',
+                        className: 'border'
+                      },
+                      {
+                        key: 'count',
+                        header: 'Count',
+                        type: 'number',
+                        className: 'border text-right',
+                        headerClassName: 'text-right border'
+                      },
+                      {
+                        key: 'percentage',
+                        header: 'Percentage',
+                        type: 'number',
+                        className: 'border text-right',
+                        headerClassName: 'text-right border',
+                        render: (row) => `${row.percentage}%`
+                      },
+                      {
+                        key: 'value',
+                        header: 'Volume',
+                        type: 'number',
+                        className: 'border text-right',
+                        headerClassName: 'text-right border',
+                        render: (row) => formatCurrency(row.value)
+                      },
+                      {
+                        key: 'totalAmount',
+                        header: 'Net Amount',
+                        type: 'number',
+                        className: 'border text-right',
+                        headerClassName: 'text-right border',
+                        render: (row) => (
+                          <span style={{color: row.totalAmount < 0 ? '#F44336' : '#4CAF50'}}>
+                            {formatCurrency(row.totalAmount)}
+                          </span>
+                        )
+                      }
+                    ]}
+                  />
                 </div>
               )}
+              
+              {/* All Transactions Table */}
+              <div className="mt-8">
+                <h3 className="text-lg font-semibold mb-4">All Transactions</h3>
+                <SortableTable
+                  data={data.allTransactions} // Access consolidated transactions from state
+                  columns={[
+                    { key: 'Booking Date', header: 'Date', type: 'date' },
+                    { key: 'Partner Name', header: 'Partner', type: 'string' },
+                    { key: 'Payment Reference', header: 'Reference', type: 'string' },
+                    { key: 'Type', header: 'Type', type: 'string', render: (value) => {
+                        // Apply renaming for display in this table too
+                        if (value === 'Presentment') return 'Card Payment';
+                        if (value === 'Presentment Refund') return 'Card Refund';
+                        return value;
+                      }
+                    },
+                    {
+                      key: 'Amount (EUR)',
+                      header: 'Amount (€)',
+                      type: 'number',
+                      render: (value) => (
+                        <span style={{ color: value < 0 ? '#F44336' : '#4CAF50' }}>
+                          {formatCurrency(value)}
+                        </span>
+                      )
+                    }
+                  ]}
+                  defaultSortKey="Booking Date"
+                  defaultSortDirection="desc"
+                  tableName="All_Transactions"
+                  useVirtualization={true} // Enable virtualization
+                  virtualHeight={600}      // Set a suitable height for the virtualized area
+                  rowHeight={40}           // Set the height for each row
+                />
+              </div>
               
               {transactionView === 'currencies' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -708,26 +817,33 @@ const FinancialDashboard = ({ csvData }) => {
                     </ResponsiveContainer>
                   </div>
                   
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full">
-                      <thead>
-                        <tr className="bg-gray-100">
-                          <th className="py-2 px-4 text-left border">Currency</th>
-                          <th className="py-2 px-4 text-right border">Count</th>
-                          <th className="py-2 px-4 text-right border">Percentage</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.currencyDistribution.map((currency, index) => (
-                          <tr key={index} className="border-b border-gray-200">
-                            <td className="py-2 px-4 border">{currency.name}</td>
-                            <td className="py-2 px-4 border text-right">{currency.count}</td>
-                            <td className="py-2 px-4 border text-right">{currency.percentage}%</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <SortableTable
+                    tableName="Currency Distribution"
+                    data={data.currencyDistribution}
+                    columns={[
+                      {
+                        key: 'name',
+                        header: 'Currency',
+                        type: 'string',
+                        className: 'border'
+                      },
+                      {
+                        key: 'count',
+                        header: 'Count',
+                        type: 'number',
+                        className: 'border text-right',
+                        headerClassName: 'text-right border'
+                      },
+                      {
+                        key: 'percentage',
+                        header: 'Percentage',
+                        type: 'number',
+                        className: 'border text-right',
+                        headerClassName: 'text-right border',
+                        render: (row) => `${row.percentage}%`
+                      }
+                    ]}
+                  />
                 </div>
               )}
             </div>
@@ -1037,34 +1153,62 @@ const FinancialDashboard = ({ csvData }) => {
                 </ResponsiveContainer>
               </div>
               
-              <div className="overflow-x-auto">
-                <table className="min-w-full">
-                  <thead>
-                    <tr className="bg-gray-100">
-                      <th className="py-2 px-4 border text-left">Partner</th>
-                      <th className="py-2 px-4 border text-right">Transactions</th>
-                      <th className="py-2 px-4 border text-right">Total Volume</th>
-                      <th className="py-2 px-4 border text-right">Total Inflows</th>
-                      <th className="py-2 px-4 border text-right">Total Outflows</th>
-                      <th className="py-2 px-4 border text-right">Net Flow</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.partnerVolumes.map((partner, index) => (
-                      <tr key={index} className={partner.net < 0 ? "bg-red-50" : "bg-green-50"}>
-                        <td className="py-2 px-4 border">{partner.name}</td>
-                        <td className="py-2 px-4 border text-right">{partner.count}</td>
-                        <td className="py-2 px-4 border text-right">{formatCurrency(partner.totalVolume)}</td>
-                        <td className="py-2 px-4 border text-right text-green-600">{formatCurrency(partner.totalIn)}</td>
-                        <td className="py-2 px-4 border text-right text-red-600">{formatCurrency(Math.abs(partner.totalOut))}</td>
-                        <td className="py-2 px-4 border text-right" style={{color: partner.net < 0 ? '#F44336' : '#4CAF50'}}>
-                          {formatCurrency(partner.net)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <SortableTable
+                tableName="Top Partners"
+                data={data.partnerVolumes}
+                columns={[
+                  {
+                    key: 'name',
+                    header: 'Partner',
+                    type: 'string',
+                    className: 'border'
+                  },
+                  {
+                    key: 'count',
+                    header: 'Transactions',
+                    type: 'number',
+                    className: 'border text-right',
+                    headerClassName: 'text-right border'
+                  },
+                  {
+                    key: 'totalVolume',
+                    header: 'Total Volume',
+                    type: 'number',
+                    className: 'border text-right',
+                    headerClassName: 'text-right border',
+                    render: (row) => formatCurrency(row.totalVolume)
+                  },
+                  {
+                    key: 'totalIn',
+                    header: 'Total Inflows',
+                    type: 'number',
+                    className: 'border text-right text-green-600',
+                    headerClassName: 'text-right border',
+                    render: (row) => formatCurrency(row.totalIn)
+                  },
+                  {
+                    key: 'totalOut',
+                    header: 'Total Outflows',
+                    type: 'number',
+                    className: 'border text-right text-red-600',
+                    headerClassName: 'text-right border',
+                    render: (row) => formatCurrency(Math.abs(row.totalOut))
+                  },
+                  {
+                    key: 'net',
+                    header: 'Net Flow',
+                    type: 'number',
+                    className: 'border text-right',
+                    headerClassName: 'text-right border',
+                    render: (row) => (
+                      <span style={{color: row.net < 0 ? '#F44336' : '#4CAF50'}}>
+                        {formatCurrency(row.net)}
+                      </span>
+                    )
+                  }
+                ]}
+                getRowClassName={(row) => row.net < 0 ? "bg-red-50" : "bg-green-50"}
+              />
             </div>
           )}
         </div>
